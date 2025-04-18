@@ -139,7 +139,7 @@ try:
     
     # Load hard difficulty model
     hard_model = AlphaZero(device=device)
-    hard_model_path = 'ultimate_tic_tac_toe_model.pth'
+    hard_model_path = 'ultimate_tic_tac_toe_ppo_final.pth'
     if os.path.exists(hard_model_path):
         state_dict = torch.load(hard_model_path, map_location=device)
         hard_model.model.load_state_dict(state_dict)
@@ -199,6 +199,7 @@ async def make_move(request: Request):
         col = move.get("col")
         player = move.get("player")
         difficulty = move.get("difficulty", "easy")
+        is_player_move = move.get("is_player_move", True)
 
         if not isinstance(row, int) or not isinstance(col, int):
             raise HTTPException(status_code=400, detail="Invalid move coordinates type")
@@ -209,101 +210,107 @@ async def make_move(request: Request):
         if game_state["game_over"]:
             raise HTTPException(status_code=400, detail="Game is already over")
 
-        if game_state["board"][row][col] != 0:
-            raise HTTPException(status_code=400, detail="Cell already occupied")
+        if is_player_move:
+            # For player moves, validate the cell is empty
+            if game_state["board"][row][col] != 0:
+                raise HTTPException(status_code=400, detail="Cell already occupied")
 
-        # Validate move based on active sub-board
-        sub_row, sub_col = row // 3, col // 3
-        if game_state["active_sub_row"] is not None and game_state["active_sub_col"] is not None:
-            if sub_row != game_state["active_sub_row"] or sub_col != game_state["active_sub_col"]:
-                if not is_sub_board_playable(game_state, game_state["active_sub_row"], game_state["active_sub_col"]):
-                    if not is_sub_board_playable(game_state, sub_row, sub_col):
-                        raise HTTPException(status_code=400, detail="Selected sub-board is not playable")
-                else:
-                    raise HTTPException(status_code=400, detail="Must play in the active sub-board")
+            # Validate move based on active sub-board
+            sub_row, sub_col = row // 3, col // 3
+            if game_state["active_sub_row"] is not None and game_state["active_sub_col"] is not None:
+                if sub_row != game_state["active_sub_row"] or sub_col != game_state["active_sub_col"]:
+                    if not is_sub_board_playable(game_state, game_state["active_sub_row"], game_state["active_sub_col"]):
+                        if not is_sub_board_playable(game_state, sub_row, sub_col):
+                            raise HTTPException(status_code=400, detail="Selected sub-board is not playable")
+                    else:
+                        raise HTTPException(status_code=400, detail="Must play in the active sub-board")
 
-        # Make player move
-        game_state["board"][row][col] = player
-        game_state["last_move"] = (row, col)
-        
-        # Update meta-board
-        game_state["meta_board"][sub_row][sub_col] = check_sub_board_winner(
-            game_state["board"], sub_row, sub_col
-        )
-        
-        # Update active sub-board for next move
-        next_sub_row, next_sub_col = row % 3, col % 3
-        if is_sub_board_playable(game_state, next_sub_row, next_sub_col):
-            game_state["active_sub_row"] = next_sub_row
-            game_state["active_sub_col"] = next_sub_col
+            # Make player move
+            game_state["board"][row][col] = player
+            game_state["last_move"] = (row, col)
+            
+            # Update meta-board
+            game_state["meta_board"][sub_row][sub_col] = check_sub_board_winner(
+                game_state["board"], sub_row, sub_col
+            )
+            
+            # Update active sub-board for next move
+            next_sub_row, next_sub_col = row % 3, col % 3
+            if is_sub_board_playable(game_state, next_sub_row, next_sub_col):
+                game_state["active_sub_row"] = next_sub_row
+                game_state["active_sub_col"] = next_sub_col
+            else:
+                game_state["active_sub_row"] = None
+                game_state["active_sub_col"] = None
+            
+            # Check for winner
+            game_state["winner"] = check_global_winner(game_state["meta_board"])
+            if game_state["winner"] is not None:
+                game_state["game_over"] = True
+            elif all(cell != 0 for row in game_state["board"] for cell in row):
+                game_state["game_over"] = True
+
+            return game_state
         else:
-            game_state["active_sub_row"] = None
-            game_state["active_sub_col"] = None
-        
-        # Check for winner
-        game_state["winner"] = check_global_winner(game_state["meta_board"])
-        if game_state["winner"] is not None:
-            game_state["game_over"] = True
-        elif all(cell != 0 for row in game_state["board"] for cell in row):
-            game_state["game_over"] = True
-        
-        # If game is not over and it's AI's turn, make AI move
-        if not game_state["game_over"] and player == 1:
-            valid_moves = get_valid_moves(game_state)
-            if valid_moves:
-                if difficulty == "hard" and hard_model:
-                    try:
-                        ai_move = hard_model.mcts(game_state)
-                        if not ai_move or ai_move not in valid_moves:
-                            ai_move = random.choice(valid_moves)
-                    except:
-                        ai_move = random.choice(valid_moves)
-                elif difficulty == "medium" and medium_model:
-                    try:
-                        # Prepare state for improved model
-                        board_tensor = prepare_state_for_improved_model(game_state)
-                        with torch.no_grad():
-                            policy, _ = medium_model(board_tensor)
-                            # Get move probabilities and mask invalid moves
-                            move_probs = F.softmax(policy, dim=1).squeeze()
-                            valid_move_mask = torch.zeros_like(move_probs)
-                            valid_move_mask[valid_moves] = 1
-                            masked_probs = move_probs * valid_move_mask
-                            if masked_probs.sum() > 0:
-                                ai_move = valid_moves[torch.argmax(masked_probs).item()]
-                            else:
+            # Bot's move
+            if not game_state["game_over"]:
+                valid_moves = get_valid_moves(game_state)
+                if valid_moves:
+                    if difficulty == "hard" and hard_model:
+                        try:
+                            ai_move = hard_model.mcts(game_state)
+                            if not ai_move or ai_move not in valid_moves:
                                 ai_move = random.choice(valid_moves)
-                    except Exception as e:
-                        print(f"Medium model error: {str(e)}")
+                        except:
+                            ai_move = random.choice(valid_moves)
+                    elif difficulty == "medium" and medium_model:
+                        try:
+                            # Prepare state for improved model
+                            board_tensor = prepare_state_for_improved_model(game_state)
+                            with torch.no_grad():
+                                policy, _ = medium_model(board_tensor)
+                                # Get move probabilities and mask invalid moves
+                                move_probs = F.softmax(policy, dim=1).squeeze()
+                                valid_move_mask = torch.zeros_like(move_probs)
+                                valid_move_mask[valid_moves] = 1
+                                masked_probs = move_probs * valid_move_mask
+                                if masked_probs.sum() > 0:
+                                    ai_move = valid_moves[torch.argmax(masked_probs).item()]
+                                else:
+                                    ai_move = random.choice(valid_moves)
+                        except Exception as e:
+                            print(f"Medium model error: {str(e)}")
+                            ai_move = random.choice(valid_moves)
+                    else:  # Easy difficulty
                         ai_move = random.choice(valid_moves)
-                else:  # Easy difficulty
-                    ai_move = random.choice(valid_moves)
 
-                game_state["board"][ai_move[0]][ai_move[1]] = -1
-                game_state["last_move"] = ai_move
-                
-                # Update meta-board after AI move
-                ai_sub_row, ai_sub_col = ai_move[0] // 3, ai_move[1] // 3
-                game_state["meta_board"][ai_sub_row][ai_sub_col] = check_sub_board_winner(
-                    game_state["board"], ai_sub_row, ai_sub_col
-                )
-                
-                # Update active sub-board for next move
-                next_sub_row, next_sub_col = ai_move[0] % 3, ai_move[1] % 3
-                if is_sub_board_playable(game_state, next_sub_row, next_sub_col):
-                    game_state["active_sub_row"] = next_sub_row
-                    game_state["active_sub_col"] = next_sub_col
-                else:
-                    game_state["active_sub_row"] = None
-                    game_state["active_sub_col"] = None
-                
-                # Check for winner after AI move
-                game_state["winner"] = check_global_winner(game_state["meta_board"])
-                if game_state["winner"] is not None:
-                    game_state["game_over"] = True
+                    game_state["board"][ai_move[0]][ai_move[1]] = -1
+                    game_state["last_move"] = ai_move
+                    
+                    # Update meta-board after AI move
+                    ai_sub_row, ai_sub_col = ai_move[0] // 3, ai_move[1] // 3
+                    game_state["meta_board"][ai_sub_row][ai_sub_col] = check_sub_board_winner(
+                        game_state["board"], ai_sub_row, ai_sub_col
+                    )
+                    
+                    # Update active sub-board for next move
+                    next_sub_row, next_sub_col = ai_move[0] % 3, ai_move[1] % 3
+                    if is_sub_board_playable(game_state, next_sub_row, next_sub_col):
+                        game_state["active_sub_row"] = next_sub_row
+                        game_state["active_sub_col"] = next_sub_col
+                    else:
+                        game_state["active_sub_row"] = None
+                        game_state["active_sub_col"] = None
+                    
+                    # Check for winner after AI move
+                    game_state["winner"] = check_global_winner(game_state["meta_board"])
+                    if game_state["winner"] is not None:
+                        game_state["game_over"] = True
 
-        return game_state
+            return game_state
+
     except Exception as e:
+        print(f"Error in make_move: {str(e)}")  # Add debug logging
         raise HTTPException(status_code=500, detail=f"Error processing move: {str(e)}")
 
 def check_sub_board_winner(board, sub_row, sub_col):
