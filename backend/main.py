@@ -409,7 +409,7 @@ def get_valid_moves(game_state):
 
 def prepare_state_for_improved_model(state):
     """Convert game state to tensor format for improved model"""
-    # Create 4 channels: player pieces, opponent pieces, meta board, active sub-board
+    # Create 4 channels: player pieces, opponent pieces, meta board, and active sub-board
     channels = np.zeros((4, 9, 9), dtype=np.float32)
     
     # Player pieces (X)
@@ -426,8 +426,9 @@ def prepare_state_for_improved_model(state):
     
     # Active sub-board
     if state["active_sub_row"] is not None and state["active_sub_col"] is not None:
-        i, j = state["active_sub_row"], state["active_sub_col"]
-        channels[3, i*3:(i+1)*3, j*3:(j+1)*3] = 1
+        start_row = state["active_sub_row"] * 3
+        start_col = state["active_sub_col"] * 3
+        channels[3, start_row:start_row+3, start_col:start_col+3] = 1.0
     
     return torch.FloatTensor(channels).unsqueeze(0).to(device)
 

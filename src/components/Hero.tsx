@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Zap } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
+import RulesModal from './RulesModal';
 
 const Hero = () => {
   const navigate = useNavigate();
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col items-center justify-center text-center px-4 pt-24">
@@ -37,7 +39,11 @@ const Hero = () => {
             Play Now 
             <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform duration-300" />
           </Button>
-          <Button variant="outline" className="bg-transparent border-white/20 hover:bg-white/10 text-white px-8 py-7 text-lg hover:border-tictac-purple/50 transition-all duration-300">
+          <Button 
+            variant="outline" 
+            className="bg-transparent border-white/20 hover:bg-white/10 text-white px-8 py-7 text-lg hover:border-tictac-purple/50 transition-all duration-300"
+            onClick={() => setIsRulesModalOpen(true)}
+          >
             Learn Rules
           </Button>
         </div>
@@ -48,7 +54,7 @@ const Hero = () => {
           <div className="h-10 w-10 rounded-full bg-tictac-purple/20 flex items-center justify-center">
             <Zap className="h-5 w-5 text-tictac-purple" />
           </div>
-          <p className="font-medium ml-3 text-lg">Quick Stats</p>
+          <p className="font-medium ml-3 text-lg text-white">Quick Stats</p>
         </div>
         <div className="grid grid-cols-3 gap-4 text-center">
           <div className="p-3 hover:bg-white/5 rounded-lg transition-colors">
@@ -65,6 +71,11 @@ const Hero = () => {
           </div>
         </div>
       </div>
+
+      <RulesModal 
+        isOpen={isRulesModalOpen} 
+        onClose={() => setIsRulesModalOpen(false)} 
+      />
     </div>
   );
 };
