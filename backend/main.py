@@ -374,8 +374,9 @@ def is_sub_board_playable(game_state, sub_row, sub_col):
 
 def get_valid_moves(game_state):
     valid_moves = []
+    
+    # If no active sub-board is specified, can play in any playable sub-board
     if game_state["active_sub_row"] is None or game_state["active_sub_col"] is None:
-        # Can play in any open cell in any playable sub-board
         for sub_row in range(3):
             for sub_col in range(3):
                 if is_sub_board_playable(game_state, sub_row, sub_col):
@@ -386,16 +387,17 @@ def get_valid_moves(game_state):
                             if game_state["board"][r][c] == 0:
                                 valid_moves.append((r, c))
     else:
-        # Must play in the active sub-board if it's playable
-        start_row = game_state["active_sub_row"] * 3
-        start_col = game_state["active_sub_col"] * 3
-        for r in range(start_row, start_row + 3):
-            for c in range(start_col, start_col + 3):
-                if game_state["board"][r][c] == 0:
-                    valid_moves.append((r, c))
-        
-        # If active sub-board is not playable, can play in any open cell in any playable sub-board
-        if not valid_moves or not is_sub_board_playable(game_state, game_state["active_sub_row"], game_state["active_sub_col"]):
+        # First check if the active sub-board is playable
+        if is_sub_board_playable(game_state, game_state["active_sub_row"], game_state["active_sub_col"]):
+            # Must play in the active sub-board if it's playable
+            start_row = game_state["active_sub_row"] * 3
+            start_col = game_state["active_sub_col"] * 3
+            for r in range(start_row, start_row + 3):
+                for c in range(start_col, start_col + 3):
+                    if game_state["board"][r][c] == 0:
+                        valid_moves.append((r, c))
+        else:
+            # If active sub-board is not playable, can play in any open cell in any playable sub-board
             for sub_row in range(3):
                 for sub_col in range(3):
                     if is_sub_board_playable(game_state, sub_row, sub_col):
@@ -405,6 +407,7 @@ def get_valid_moves(game_state):
                             for c in range(start_col, start_col + 3):
                                 if game_state["board"][r][c] == 0:
                                     valid_moves.append((r, c))
+    
     return valid_moves
 
 def prepare_state_for_improved_model(state):
